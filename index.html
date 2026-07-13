@@ -562,7 +562,7 @@
    Until ROSTER_ENDPOINT is filled in, this feature does nothing —
    the app works exactly as before with no errors or network calls.
    ================================================================ */
-const ROSTER_ENDPOINT = ''; // <-- paste your Apps Script Web App URL here
+const ROSTER_ENDPOINT = 'https://script.google.com/macros/s/AKfycbwYTr-v6AtJCou3yT8yNTsI0WjPiEVsFU9NLxHLz0--no6EjdNiWYqqa3mO4WH5XYId/exec'; // <-- paste your Apps Script Web App URL here
 let rosterSyncTimer = null;
 function scheduleRosterSync(){
   if(!ROSTER_ENDPOINT) return;
