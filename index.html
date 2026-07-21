@@ -601,7 +601,7 @@ function syncRoster(){
 }
 
 /* ---- Talk to Your Familiar ---- */
-const MESSAGE_COOLDOWN_MS = 30 * 60 * 1000; // one message every 30 minutes, so the reply inbox stays manageable
+const MESSAGE_COOLDOWN_MS = 0; // No cooldown delay between messages
 const MESSAGE_MAX_LEN = 300;
 function goTalk(){ renderTalk(); showView('view-talk'); checkForReplies(); }
 function messageCooldownRemaining(){
