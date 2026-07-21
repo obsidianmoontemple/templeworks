@@ -487,11 +487,11 @@
   </div>
 
   <div class="view" id="view-talk">
-    <button class="back-link" onclick="goFamiliar()">← Back to My Familiar</button>
+    <button class="back-link" onclick="leaveTalkView(); goFamiliar();">← Back to My Familiar</button>
     <header class="hero">
       <div class="eyebrow">Familiar's Corner</div>
       <h1 style="font-size:clamp(1.5rem,4vw,2.2rem);">Talk to Your Familiar</h1>
-      <p class="sub">Send a little note and see what they have to say back.</p>
+      <p class="sub">Send a note to your guide and chat back and forth.</p>
     </header>
     <div id="talk-content" style="max-width:460px;margin:0 auto;"></div>
   </div>
@@ -543,26 +543,8 @@
 <script>
 /* ================================================================
    PARENT / CONTEST ROSTER SYNC
-   ----------------------------------------------------------------
-   To let parents/admins view a live roster of every kid's familiar
-   and their Temple Time Adventures / Wheel of the Year completion,
-   this app can quietly send a small summary to a Google Sheet after
-   an Apps Script Web App URL is set below.
-
-   SETUP (one-time):
-   1. Create a new Google Sheet.
-   2. Extensions -> Apps Script. Delete the placeholder code and
-      paste in the Code.gs contents provided alongside this file.
-   3. Deploy -> New deployment -> type "Web app".
-        - Execute as: Me
-        - Who has access: Anyone
-   4. Copy the deployment URL and paste it below as ROSTER_ENDPOINT.
-   5. Re-upload this file to your site.
-
-   Until ROSTER_ENDPOINT is filled in, this feature does nothing —
-   the app works exactly as before with no errors or network calls.
    ================================================================ */
-const ROSTER_ENDPOINT = 'https://script.google.com/macros/s/AKfycbwYTr-v6AtJCou3yT8yNTsI0WjPiEVsFU9NLxHLz0--no6EjdNiWYqqa3mO4WH5XYId/exec'; // <-- paste your Apps Script Web App URL here
+const ROSTER_ENDPOINT = 'https://script.google.com/macros/s/AKfycbwYTr-v6AtJCou3yT8yNTsI0WjPiEVsFU9NLxHLz0--no6EjdNiWYqqa3mO4WH5XYId/exec';
 let rosterSyncTimer = null;
 function scheduleRosterSync(){
   if(!ROSTER_ENDPOINT) return;
@@ -594,21 +576,34 @@ function syncRoster(){
     };
     fetch(ROSTER_ENDPOINT, {
       method:'POST',
-      headers:{'Content-Type':'text/plain;charset=utf-8'}, // avoids a CORS preflight Apps Script can't handle
+      headers:{'Content-Type':'text/plain;charset=utf-8'},
       body: JSON.stringify(payload)
-    }).catch(()=>{ /* fail silently — never block gameplay on a network hiccup */ });
-  } catch(err){ /* fail silently */ }
+    }).catch(()=>{});
+  } catch(err){}
 }
 
-/* ---- Talk to Your Familiar ---- */
-const MESSAGE_COOLDOWN_MS = 0; // No cooldown delay between messages
+/* ---- Talk to Your Familiar (Live Chat Enabled) ---- */
+const MESSAGE_COOLDOWN_MS = 0; // Cooldown removed so messaging is continuous
 const MESSAGE_MAX_LEN = 300;
-function goTalk(){ renderTalk(); showView('view-talk'); checkForReplies(); }
-function messageCooldownRemaining(){
-  const last = PROGRESS.lastMessageSentAt || 0;
-  const remaining = MESSAGE_COOLDOWN_MS - (Date.now() - last);
-  return remaining > 0 ? Math.ceil(remaining/60000) : 0;
+let chatPollInterval = null;
+
+function goTalk(){ 
+  renderTalk(); 
+  showView('view-talk'); 
+  checkForReplies(); 
+
+  // Poll Google Sheets for live replies every 5 seconds while chat is active
+  if(chatPollInterval) clearInterval(chatPollInterval);
+  chatPollInterval = setInterval(checkForReplies, 5000);
 }
+
+function leaveTalkView(){
+  if(chatPollInterval){
+    clearInterval(chatPollInterval);
+    chatPollInterval = null;
+  }
+}
+
 function renderTalk(){
   const el = document.getElementById('talk-content');
   if(!el) return;
@@ -616,26 +611,27 @@ function renderTalk(){
   const fam = FAMILIARS.find(f=>f.id===famId) || FAMILIARS[0];
   const displayName = PROGRESS.familiarName || fam.name;
   const messages = PROGRESS.messages || [];
-  const cooldownLeft = messageCooldownRemaining();
+
   const threadHtml = messages.slice().reverse().map(m => `
     <div class="talk-msg-mine">${escapeHtml(m.text)}</div>
     ${m.reply ? `<div class="talk-msg-reply"><b>${escapeHtml(displayName)} says:</b> ${escapeHtml(m.reply)}</div>` : `<div class="talk-msg-waiting">Waiting to hear back...</div>`}
   `).join('');
+
   el.innerHTML = `
     <div class="reveal-box" style="text-align:left;">
-      <b>Before you write:</b> a real person on our team reads these and writes back as ${escapeHtml(displayName)} — it might take a few days, not instantly like magic! And please don't share your address, phone number, or other private details.
+      <b>Message Your Guide:</b> Send a note to ${escapeHtml(displayName)} anytime. Responses will appear right here in real time!
     </div>
     <textarea id="talk-input" maxlength="${MESSAGE_MAX_LEN}" placeholder="What do you want to tell ${escapeHtml(displayName)}?" style="width:100%;min-height:90px;margin-top:12px;padding:12px;border-radius:12px;border:1px solid rgba(241,238,251,.3);background:rgba(255,255,255,.05);color:var(--moon);font-family:inherit;font-size:.9rem;"></textarea>
     <div style="text-align:center;margin:12px 0;">
-      <button class="nav-btn primary" onclick="sendFamiliarMessage()" ${(cooldownLeft>0 || !ROSTER_ENDPOINT)?'disabled':''}>Send 💌</button>
+      <button class="nav-btn primary" onclick="sendFamiliarMessage()" ${!ROSTER_ENDPOINT?'disabled':''}>Send 💌</button>
     </div>
     ${!ROSTER_ENDPOINT ? `<div class="progress-note" style="text-align:center;">This feature isn't set up yet — check back soon!</div>` : ''}
-    ${cooldownLeft>0 ? `<div class="progress-note" style="text-align:center;">You can send another message in ${cooldownLeft} minute${cooldownLeft===1?'':'s'}.</div>` : ''}
     <div style="margin-top:18px;">${threadHtml || '<p style="text-align:center;color:var(--moon-dim);font-size:.85rem;">No messages yet — say hello!</p>'}</div>
   `;
 }
+
 function sendFamiliarMessage(){
-  if(!ROSTER_ENDPOINT || messageCooldownRemaining()>0) return;
+  if(!ROSTER_ENDPOINT) return;
   const input = document.getElementById('talk-input');
   const text = (input ? input.value.trim() : '').slice(0, MESSAGE_MAX_LEN);
   if(!text) return;
@@ -646,8 +642,11 @@ function sendFamiliarMessage(){
   PROGRESS.messages.push({id:messageId, text:text, sentAt:Date.now(), reply:null, replyAt:null});
   PROGRESS.lastMessageSentAt = Date.now();
   saveProgress();
+  
+  if(input) input.value = '';
   renderTalk();
   showToast('💌 Message sent!');
+  
   try{
     fetch(ROSTER_ENDPOINT, {
       method:'POST',
@@ -662,8 +661,9 @@ function sendFamiliarMessage(){
         text: text
       })
     }).catch(()=>{});
-  } catch(err){ /* fail silently — the message is already saved locally either way */ }
+  } catch(err){}
 }
+
 function checkForReplies(){
   if(!ROSTER_ENDPOINT) return;
   const pid = PROGRESS.profileId || ACTIVE_PROFILE;
@@ -700,7 +700,7 @@ function checkForReplies(){
   }
 })();
 
-/* ================= Celebrations: toasts + confetti ================= */
+/* ================= Celebrations ================= */
 function showToast(msg){
   const stack = document.getElementById('toast-stack');
   if(!stack) return;
@@ -737,7 +737,7 @@ function celebrate(msg, big){
   burstConfetti(big);
 }
 
-/* ================= Persistent progress (multi-profile) ================= */
+/* ================= Persistent Progress ================= */
 function loadProfiles(){
   try{ const raw = localStorage.getItem('ttaProfiles'); if(raw) return JSON.parse(raw); }catch(e){}
   return {};
@@ -835,7 +835,7 @@ function shuffledIndices(n){
   return a;
 }
 
-/* ================= Station 1 data: Temple Time Adventures ================= */
+/* ================= Station 1 Data ================= */
 const CHAPTERS = [
 {id:'fear', station:'station1', title:'Facing Your Fear', guide:'Hekate, the Owl of the Whispering Woods', color:'#E8834C', emoji:'🦉',
   story:[
@@ -1037,7 +1037,7 @@ const CHAPTERS = [
 }
 ];
 
-/* ================= Station 2 data: Wheel of the Year ================= */
+/* ================= Station 2 Data ================= */
 const SABBATS = [
 {id:'samhain', station:'station2', title:'Samhain', guide:"The Witches' New Year · Oct 31", color:'#9C89C7', emoji:'🎃', season:'The veil grows thin',
   story:[
@@ -1185,7 +1185,7 @@ const SABBATS = [
 }
 ];
 
-/* ================= Quiz data (Station 3) ================= */
+/* ================= Quiz Data (Station 3) ================= */
 const QUIZ = [
   {q:"Who helped Ember find his courage in the whispering woods?", options:["Hekate the owl","Brigid the goddess","Corvus the crow","Anansi the spider"], a:0},
   {q:"What did Ve, Vili, and Odin plant to grow Yggdrasil, the World Tree?", options:["A golden acorn","A tiny seed from Ymir's beard","A snowflake","A silver thimble"], a:1},
@@ -1216,6 +1216,7 @@ function showView(id){
   window.scrollTo({top:0, behavior:'smooth'});
 }
 function goHub(){
+  leaveTalkView();
   const fam = (PROGRESS.familiar && FAMILIARS.find(f=>f.id===PROGRESS.familiar)) || null;
   document.getElementById('hub-welcome').innerHTML = ACTIVE_PROFILE ? ((fam?`<span style="${familiarFilterStyle(PROGRESS.familiarColor)}">${fam.emoji}</span> `:'✨ ') + escapeHtml(ACTIVE_PROFILE) + "'s Adventure") : '';
   renderContestNameRow();
@@ -1243,14 +1244,14 @@ function editContestName(){
   renderContestNameRow();
   showToast(trimmed ? '🏆 Contest name saved!' : '🏆 Contest name cleared.');
 }
-function goStation3(){ renderStation3(); showView('view-station3'); }
-function goProfiles(){ renderFamiliarRow(); renderProfileList(); showView('view-profiles'); }
-function goTreasures(){ renderTreasures(); showView('view-treasures'); }
-function goPotion(){ renderPotion(); showView('view-potion'); }
-function goSpellJar(){ renderSpellJar(); showView('view-spelljar'); }
-function goWisdom(){ renderWisdom(); showView('view-wisdom'); }
-function goSpellbook(){ renderSpellbook(); showView('view-spellbook'); }
-function goFamiliar(){ cancelCareInteraction(); renderFamiliar(); showView('view-familiar'); }
+function goStation3(){ leaveTalkView(); renderStation3(); showView('view-station3'); }
+function goProfiles(){ leaveTalkView(); renderFamiliarRow(); renderProfileList(); showView('view-profiles'); }
+function goTreasures(){ leaveTalkView(); renderTreasures(); showView('view-treasures'); }
+function goPotion(){ leaveTalkView(); renderPotion(); showView('view-potion'); }
+function goSpellJar(){ leaveTalkView(); renderSpellJar(); showView('view-spelljar'); }
+function goWisdom(){ leaveTalkView(); renderWisdom(); showView('view-wisdom'); }
+function goSpellbook(){ leaveTalkView(); renderSpellbook(); showView('view-spellbook'); }
+function goFamiliar(){ leaveTalkView(); cancelCareInteraction(); renderFamiliar(); showView('view-familiar'); }
 
 /* ================= Profiles ================= */
 function renderFamiliarRow(){
@@ -1282,7 +1283,7 @@ function familiarColorName(hue){
   const c = FAMILIAR_COLORS.find(c=>c.hue === (hue||0)) || FAMILIAR_COLORS[0];
   return c.name;
 }
-function goCeremony(){ renderCeremony(); showView('view-ceremony'); }
+function goCeremony(){ leaveTalkView(); renderCeremony(); showView('view-ceremony'); }
 function renderCeremony(){
   const famId = PROGRESS.familiar || FAMILIARS[0].id;
   const fam = FAMILIARS.find(f=>f.id===famId) || FAMILIARS[0];
@@ -1427,7 +1428,7 @@ function renderMoonWidget(){
   `;
 }
 
-/* ================= Familiar's Corner: mini portals ================= */
+/* ================= Familiar's Corner Portals ================= */
 function renderCornerRow(){
   const el = document.getElementById('corner-row');
   if(!el) return;
@@ -1440,13 +1441,13 @@ function renderCornerRow(){
   `;
 }
 
-/* ================= My Familiar (pixel companion) ================= */
+/* ================= My Familiar Companion ================= */
 function ensurePet(){
   if(!PROGRESS.pet) PROGRESS.pet = {hunger:80, happy:80, energy:80, clean:80, lastVisit:Date.now(), lastCareAction:Date.now(), bond:0};
   if(PROGRESS.pet.clean === undefined) PROGRESS.pet.clean = 80;
   if(!PROGRESS.pet.lastCareAction) PROGRESS.pet.lastCareAction = PROGRESS.pet.lastVisit || Date.now();
 }
-const DORMANT_MS = 3 * 24 * 3600 * 1000; // 3 days of no care action
+const DORMANT_MS = 3 * 24 * 3600 * 1000;
 function updatePetDecay(){
   ensurePet();
   const now = Date.now();
@@ -1649,7 +1650,6 @@ function renderFamiliar(){
     `<button class="swatch ${curHue===c.hue?'chosen-swatch':''}" title="${c.name}" style="background:${c.hex || naturalHex};" onclick="recolorFamiliar(${c.hue})"></button>`
   ).join('');
 
-  // Stage-aware body: the egg gets a true-color recolor; once hatched, the companion shows its original artwork with a color tint.
   let bodyHTML;
   if(stage.key==='egg'){
     const nxt = nextFamiliarStage(p.bond||0);
@@ -1704,7 +1704,7 @@ function renameFamiliar(){
 function patFamiliar(evt){
   ensurePet();
   const now = Date.now();
-  if(PROGRESS.pet.lastPat && (now - PROGRESS.pet.lastPat) < 12000) return; // brief cooldown so tapping isn't a stat-farming exploit
+  if(PROGRESS.pet.lastPat && (now - PROGRESS.pet.lastPat) < 12000) return;
   PROGRESS.pet.lastPat = now;
   PROGRESS.pet.happy = Math.min(100, PROGRESS.pet.happy + 3);
   saveProgress();
@@ -1741,13 +1741,12 @@ function petAction(type){
   const stageBefore = getFamiliarStage(p.bond||0).key;
   if(type==='feed'){
     p.hunger = Math.min(100, p.hunger+30);
-    if(!p.poo && Math.random() < 0.35) p.poo = true; // classic tamagotchi-style: eating sometimes means cleanup later
+    if(!p.poo && Math.random() < 0.35) p.poo = true;
   }
   else if(type==='play'){ p.happy = Math.min(100, p.happy+25); p.energy = Math.max(0, p.energy-10); }
   else if(type==='nap'){ p.energy = Math.min(100, p.energy+30); }
   else if(type==='clean'){ p.clean = Math.min(100, p.clean+35); p.poo = false; }
   if(wasDormant){
-    // Welcome back boost — waking up is always a happy, forgiving moment, never a loss.
     p.hunger = Math.min(100, p.hunger+15);
     p.happy = Math.min(100, p.happy+15);
     p.energy = Math.min(100, p.energy+15);
@@ -1767,7 +1766,7 @@ function petAction(type){
   } else if(levelAfter > levelBefore){
     celebrate('🎉 Level Up! Your familiar reached Level ' + levelAfter + '!', true);
   } else {
-    const doneMsgs = {feed:'🍯 Yum, all fed!', play:'🧶 What a catch!', nap:'💤 Sweet dreams!', clean:'🛁 Squeaky clean!'};
+    const doneMsgs = {feed:'🍯 Yum, all fed!', play:'🧶 What a catch!', nap:'💤 Sweet dreams!', clean:'习 Squeaky clean!'};
     if(doneMsgs[type]) showToast(doneMsgs[type]);
   }
 }
@@ -1799,9 +1798,7 @@ const INGREDIENTS = [
   {emoji:'🐝', name:'Honeybee Hum', trait:'comfort', hex:'#F2C14E', shape:'drop'},
   {emoji:'🌊', name:'Tidepool Drop', trait:'focus', hex:'#4FB6C7', shape:'drop'}
 ];
-// Every discoverable potion requires its exact ingredient combination — no other combination unlocks it.
 const RECIPES = [
-  // Easy — 3 ingredients (20 recipes)
   {ids:[0,4,10], emoji:'🌊', title:'Potion of Quiet Calm', text:'Settles wiggly feelings like a soft blanket.', hex:'#6FA8C7', clue:"Three quiet things that glow, hum, and chime softly beneath the moon."},
   {ids:[1,9,12], emoji:'✨', title:'Potion of Star Whispers', text:'Lets you hear what the moon is thinking.', hex:'#9C89C7', clue:'Dew from the stars, a spark of wishing, and a bloom that only dreams.'},
   {ids:[2,11,13], emoji:'😄', title:'Potion of Extra Giggles', text:'Warning: may cause snorting laughter.', hex:'#E3C567', clue:'A silly root, a feather so light, and dust that drifts from a wing.'},
@@ -1822,7 +1819,6 @@ const RECIPES = [
   {ids:[2,3,11], emoji:'🍯', title:'Potion of Honeyed Giggles', text:'Sweet enough to make even a grumpy day smile.', hex:'#F3A712', clue:'A silly root, golden sweetness, and a feather so light.'},
   {ids:[2,7,11], emoji:'🎲', title:'Potion of Lucky Laughs', text:'Somehow always giggling at exactly the right moment.', hex:'#57A773', clue:'A giggling root, a shimmering shell, and a feather so light.'},
   {ids:[2,11,18], emoji:'🪶', title:'Potion of Featherlight Giggles', text:'So light it might just float you off your feet.', hex:'#EAC9E8', clue:'A giggling root, a feather so light, and a wild little berry.'},
-  // Medium — 4 ingredients (12 recipes)
   {ids:[4,6,9,21], emoji:'🕊️', title:'Potion of Whispered Courage', text:'Brave, but the quiet, steady kind of brave.', hex:'#B85C38', clue:'A humming leaf, a fiery spice, a hopeful spark, and a feather soft as snow.'},
   {ids:[0,4,9,10], emoji:'💫', title:'Potion of Quiet Wishes', text:'Wishes whispered so softly only the moon can hear.', hex:'#7986CB', clue:'Moonlight, a humming leaf, a hopeful spark, and a quiet chime.'},
   {ids:[5,10,16,23], emoji:'❄️', title:'Potion of Crystal Chimes', text:'Rings like ice against glass on a clear, cold night.', hex:'#A0E7E5', clue:'Something icy, a chime, a shell from the tide, and a still drop of water.'},
@@ -1835,7 +1831,6 @@ const RECIPES = [
   {ids:[0,5,16,23], emoji:'🌊', title:'Potion of Ocean Whispers', text:'Carries the hush of waves rolling in and out.', hex:'#5FB6C9', clue:'Moonlight, something icy, a shell, and a still drop of water.'},
   {ids:[6,14,17,19], emoji:'🌵', title:'Potion of Desert Bloom', text:'Proof that something beautiful can grow anywhere.', hex:'#D9C36A', clue:'A fiery spice, a tiny cap, a hardy bloom, and a golden field.'},
   {ids:[2,3,18,22], emoji:'🍇', title:'Potion of Berry Sweetness', text:'A little tart, a little sweet, entirely delightful.', hex:'#A569BD', clue:'A giggling root, golden sweetness, a wild berry, and a busy hum.'},
-  // Hard — 5 ingredients (8 recipes)
   {ids:[6,14,17,19,20], emoji:'🌾', title:'Potion of Golden Harvest', text:'Tastes like the very last warm day of summer.', hex:'#E0A83E', clue:'Five things from a field of gold: fire, a tiny cap, a bloom, wheat, and a candle curl.'},
   {ids:[1,9,12,13,21], emoji:'🦢', title:'Potion of Gentle Grace', text:'Moves through the room like it barely touched the ground.', hex:'#F1D6E0', clue:'Starlight, a spark, a dreaming bloom, drifting dust, and a feather soft as snow.'},
   {ids:[2,9,13,18,22], emoji:'🦋', title:'Potion of Wishful Wings', text:'Carries your smallest wishes somewhere they can be heard.', hex:'#B98FE0', clue:'A giggling root, a spark, drifting dust, a wild berry, and a busy hum.'},
@@ -1847,6 +1842,7 @@ const RECIPES = [
 ];
 const TOTAL_DISCOVERABLE_POTIONS = RECIPES.length;
 const POTIONEER_GOAL = 20;
+
 function sameMultiset(a,b){
   if(a.length!==b.length) return false;
   const sa=a.slice().sort((x,y)=>x-y), sb=b.slice().sort((x,y)=>x-y);
@@ -1871,6 +1867,7 @@ function bestOverlapInfo(cauldronIdx){
 let potionCauldron = [];
 let potionStirs = 0;
 const STIRS_NEEDED = 3;
+
 function renderPotion(){
   potionCauldron = [];
   potionStirs = 0;
@@ -1940,6 +1937,7 @@ function blendHexColors(hexes){
 }
 function potioneerCount(){ return PROGRESS.discoveredRecipes ? PROGRESS.discoveredRecipes.length : 0; }
 function checkPotioneerReady(){ return potioneerCount() >= POTIONEER_GOAL && !PROGRESS.potioneerCertName; }
+
 function renderPotionContent(brewed, result){
   const el = document.getElementById('potion-content');
   const slots = potionCauldron.map(i=>`<div class="ingredient-slot">${INGREDIENTS[i].emoji}</div>`).join('');
@@ -2089,7 +2087,8 @@ const INTENTIONS = [
   ]}
 ];
 let jarIntention = null;
-let jarLayers = []; // array of charm indices, in the order added
+let jarLayers = [];
+
 function renderSpellJar(){
   jarIntention = null; jarLayers = [];
   renderSpellJarContent();
@@ -2269,7 +2268,7 @@ function renderHub(){
   `;
 }
 
-/* ================= Station 1 + 2 maps (shared renderer) ================= */
+/* ================= Maps ================= */
 function buildMap(items, mapId, legendId, radius){
   const wrap = document.getElementById(mapId);
   const legend = document.getElementById(legendId);
@@ -2319,7 +2318,7 @@ function markDone(item){
   }
 }
 
-/* ================= Overlay logic (shared) ================= */
+/* ================= Overlay Logic ================= */
 const overlay = document.getElementById('overlay');
 const card = document.getElementById('card');
 let currentItem = null;
@@ -2327,6 +2326,7 @@ let currentPage = 0;
 let activityState = {};
 
 function openItem(item){
+  leaveTalkView();
   currentItem = item;
   currentPage = 0;
   activityState[item.id] = initActivityState(item);
@@ -2423,7 +2423,7 @@ function activityIsComplete(item){
   return true;
 }
 
-/* ================= Activity renderers ================= */
+/* ================= Activity Renderers ================= */
 function renderActivity(item){
   const a = item.activity;
   const st = activityState[item.id];
@@ -2541,7 +2541,7 @@ function renderMatchUI(item, pairs, st, isAltar){
     <div class="reveal-box">${st.matched.size>=pairs.length ? 'All matched! Well done.' : (st.matched.size+' / '+pairs.length+' matched')}</div>`;
 }
 
-/* ================= Activity handlers ================= */
+/* ================= Activity Handlers ================= */
 function doBravery(id, choice){
   const item = CHAPTERS.concat(SABBATS).find(c=>c.id===id);
   const st = activityState[id];
@@ -2598,7 +2598,6 @@ function doQuizChain(id, optIdx){
 }
 function doSequence(id, idx){
   const st = activityState[id];
-  // correct-order check: the next expected step is the one whose original index equals placed.length
   if(idx === st.placed.length){ st.placed.push(idx); st.wrongIdx=null; }
   else { st.wrongIdx = idx; }
   renderCard();
